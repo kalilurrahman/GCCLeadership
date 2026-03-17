@@ -1,40 +1,29 @@
 """
-Extract content from the consolidated GCC Playbook DOCX into structured JSON for the PWA.
+GCC Playbook PWA Content Extraction — v2
+=========================================
+Uses GCC_Playbook_v_0.9.docx as the MASTER source for Part I.
+Adds Part II content from GCC_Playbook_Part_II_CLEAN.docx.
+Adds Part III content from GCC_Playbook_Part_III.docx.
 """
 import json
 import os
+import re
 from docx import Document
 
 DOCS_DIR = os.path.dirname(os.path.abspath(__file__))
-INPUT_FILE = os.path.join(DOCS_DIR, "GCC_Playbook_2026_2030_FINAL.docx")
 OUTPUT_DIR = os.path.join(os.path.dirname(DOCS_DIR), "..", "pwa", "public", "data")
 
-def extract_content():
-    print("Loading consolidated document...")
-    doc = Document(INPUT_FILE)
-    
+MASTER_FILE = os.path.join(DOCS_DIR, "GCC_Playbook_v_0.9.docx")
+PART2_FILE = os.path.join(DOCS_DIR, "GCC_Playbook_Part_II_CLEAN.docx")
+PART3_FILE = os.path.join(DOCS_DIR, "GCC_Playbook_Part_III.docx")
+
+
+def extract_chapters_from_doc(doc, part_label, chapter_prefix=""):
+    """Extract structured chapter data from a docx, properly handling heading hierarchy."""
     chapters = []
-    current_part = None
     current_chapter = None
     current_section = None
     current_subsection = None
-    
-    glossary_terms = []
-    in_glossary = False
-    in_index = False
-    in_references = False
-    
-    references = []
-    
-    # Parts structure
-    parts = {
-        "part1": {"title": "Part I: India's GCC Landscape", "subtitle": "Landscape, Maturity, Operating Models, Challenges, KPIs, Community", "chapters": []},
-        "part2": {"title": "Part II: GCC by Scale & Stage", "subtitle": "Sizing, Setup, Lifecycle, Case Studies, Leaders", "chapters": []},
-        "part3": {"title": "Part III: The Frontier", "subtitle": "AI, Deep Tech, M&A, Finance, Legal, ESG, 2030 Scenarios", "chapters": []},
-    }
-    
-    current_part_key = "part1"
-    chapter_counter = 0
     
     for para in doc.paragraphs:
         text = para.text.strip()
@@ -43,159 +32,286 @@ def extract_content():
         
         style_name = para.style.name if para.style else "Normal"
         
-        # Detect glossary section
-        if text == "Key Terms and Definitions":
-            in_glossary = True
-            in_index = False
-            in_references = False
-            continue
-        
-        # Detect index section
-        if text == "Subject Index":
-            in_glossary = False
-            in_index = True
-            in_references = False
-            continue
-        
-        # Detect references
-        if "VALIDATED REFERENCES" in text.upper() or "Primary Sources" in text:
-            in_glossary = False
-            in_index = False
-            in_references = True
-            continue
-        
-        # Process glossary
-        if in_glossary and not in_index:
-            if style_name.startswith('Heading'):
-                continue  # Skip alphabet headers
-            if ':' in text or '—' in text or '-' in text:
-                sep = ':' if ':' in text else ('—' if '—' in text else '-')
-                parts_split = text.split(sep, 1)
-                if len(parts_split) == 2:
-                    term = parts_split[0].strip()
-                    definition = parts_split[1].strip()
-                    if len(term) < 80 and len(definition) > 5:
-                        glossary_terms.append({"term": term, "definition": definition})
-            continue
-        
-        # Process references
-        if in_references:
-            if text and not style_name.startswith('Heading'):
-                references.append(text)
-            continue
-        
-        if in_index:
-            continue
-
-        # Detect Part transitions
-        if "PART III" in text or "Part III" in text and "Frontier" in text.lower() if "frontier" in text.lower() else False:
-            current_part_key = "part3"
-        
-        # Process headings for chapter structure
         if style_name == 'Heading 1':
-            # Determine part from numbering
-            if text.startswith(('1.', '2.', '3.', '4.', '5.', '6.')) and '.' in text[:3]:
-                num = text.split('.')[0].strip()
-                section_num = text.split(' ')[0].strip()
-                if num.isdigit() and int(num) <= 6 and current_part_key == "part1":
-                    pass  # Part I
-                elif current_part_key == "part2":
-                    pass
+            # Save previous chapter
+            if current_chapter:
+                chapters.append(current_chapter)
             
-            # Check if this is a Part II chapter (size tiers, setup, etc.)
-            if any(kw in text for kw in ['Official Size Taxonomy', 'Pre-Launch', 'Four Defining Characteristics', 
-                                          'Changes at 1,000', 'Large GCC', 'Eight Operating Models', 
-                                          'Seven Stages', 'Case Study']):
-                current_part_key = "part2"
-            
-            # Check if Part III
-            if any(kw in text for kw in ['AI as GCC Operating', 'Global Location Competition',
-                                          'GCC M&A', 'Deep-Tech GCCs', 'GCC Finance and Treasury',
-                                          'Talent Intelligence System', 'Legal, Regulatory',
-                                          'Innovation Engine', 'ESG and Sustainability',
-                                          "Leader's Career", 'GCC 2030', 'Women in GCC',
-                                          'Mid-Market GCC Playbook', 'Mental Health']):
-                current_part_key = "part3"
-            
-            chapter_counter += 1
             current_chapter = {
-                "id": f"ch-{chapter_counter}",
-                "number": text.split(' ')[0].strip() if text[0].isdigit() else str(chapter_counter),
+                "id": f"{chapter_prefix}ch-{len(chapters)+1}",
                 "title": text,
                 "sections": [],
                 "content": [],
-                "keyTakeaways": []
             }
-            parts[current_part_key]["chapters"].append(current_chapter)
             current_section = None
             current_subsection = None
             
         elif style_name == 'Heading 2':
-            if current_chapter:
-                # Check for chapter summaries / key takeaways
-                if 'Chapter Summary' in text or 'Things Every' in text or 'Principles' in text:
-                    current_section = {
-                        "title": text,
-                        "content": [],
-                        "isKeyTakeaway": True
-                    }
-                else:
-                    current_section = {
-                        "title": text,
-                        "content": [],
-                        "isKeyTakeaway": False
-                    }
-                current_chapter["sections"].append(current_section)
+            if current_chapter is None:
+                # H2 before any H1 — treat as intro section
+                current_chapter = {
+                    "id": f"{chapter_prefix}ch-intro",
+                    "title": text,
+                    "sections": [],
+                    "content": [],
+                }
+                current_section = None
                 current_subsection = None
-                
+                continue
+            
+            is_key = any(kw in text for kw in [
+                'Chapter Summary', 'Things Every', 'Principles',
+                'Ten Things', 'Ten Truths', 'Ten Community',
+                'Ten KPI', 'Key Lessons'
+            ])
+            
+            current_section = {
+                "title": text,
+                "content": [],
+                "subsections": [],
+                "isKeyTakeaway": is_key
+            }
+            current_chapter["sections"].append(current_section)
+            current_subsection = None
+            
         elif style_name == 'Heading 3':
             if current_section:
                 current_subsection = {
                     "title": text,
                     "content": []
                 }
-                current_section.setdefault("subsections", []).append(current_subsection)
+                current_section["subsections"].append(current_subsection)
+            elif current_chapter:
+                # H3 without parent H2 — make it a section
+                current_section = {
+                    "title": text,
+                    "content": [],
+                    "subsections": [],
+                    "isKeyTakeaway": False
+                }
+                current_chapter["sections"].append(current_section)
+                current_subsection = None
         else:
-            # Regular paragraph content
-            if len(text) < 5:
+            # Regular paragraph — add to deepest container
+            if len(text) < 3:
                 continue
-                
-            target = current_subsection if current_subsection else (current_section if current_section else (current_chapter if current_chapter else None))
-            if target:
-                # Limit content length per section for PWA performance
-                if len(target.get("content", [])) < 20:
-                    target.setdefault("content", []).append(text)
+            
+            target = None
+            if current_subsection is not None:
+                target = current_subsection
+            elif current_section is not None:
+                target = current_section
+            elif current_chapter is not None:
+                target = current_chapter
+            
+            if target is not None and len(target.get("content", [])) < 25:
+                target.setdefault("content", []).append(text)
     
-    # Build the final data structure
+    # Don't forget the last chapter
+    if current_chapter:
+        chapters.append(current_chapter)
+    
+    return chapters
+
+
+def extract_glossary_from_doc(doc):
+    """Extract glossary terms from a document that has a Key Terms section."""
+    glossary = []
+    in_glossary = False
+    
+    for para in doc.paragraphs:
+        text = para.text.strip()
+        style_name = para.style.name if para.style else "Normal"
+        
+        if text == "Key Terms and Definitions":
+            in_glossary = True
+            continue
+        
+        if in_glossary:
+            # Stop at Subject Index or next major heading
+            if text == "Subject Index" or (style_name == 'Heading 1' and 'Subject' in text):
+                in_glossary = False
+                continue
+            
+            if style_name.startswith('Heading'):
+                continue  # Skip alphabet headers
+            
+            if not text:
+                continue
+            
+            # Parse term: definition patterns
+            for sep in ['—', ':', ' – ']:
+                if sep in text:
+                    parts = text.split(sep, 1)
+                    if len(parts) == 2:
+                        term = parts[0].strip()
+                        definition = parts[1].strip()
+                        if 3 < len(term) < 80 and len(definition) > 10:
+                            glossary.append({"term": term, "definition": definition})
+                            break
+    
+    return glossary
+
+
+def extract_references_from_doc(doc, start_heading=""):
+    """Extract references from a document."""
+    refs = []
+    in_refs = False
+    ref_category = ""
+    
+    for para in doc.paragraphs:
+        text = para.text.strip()
+        style_name = para.style.name if para.style else "Normal"
+        
+        if any(kw in text for kw in ['VALIDATED REFERENCES', 'Primary Sources', 'How to Use This Playbook']):
+            in_refs = True
+            continue
+        
+        if in_refs:
+            if style_name.startswith('Heading'):
+                ref_category = text
+                continue
+            if text and not style_name.startswith('Heading'):
+                refs.append({"category": ref_category, "text": text})
+    
+    return refs
+
+
+def main():
+    print("=" * 60)
+    print("GCC Playbook PWA — Content Extraction v2")
+    print("=" * 60)
+    
+    # ---- PART I: from v_0.9.docx ----
+    print("\n[1/3] Extracting Part I from GCC_Playbook_v_0.9.docx...")
+    master_doc = Document(MASTER_FILE)
+    part1_chapters = extract_chapters_from_doc(master_doc, "Part I", "p1-")
+    part1_glossary = extract_glossary_from_doc(master_doc)
+    part1_refs = extract_references_from_doc(master_doc)
+    print(f"  → {len(part1_chapters)} chapters, {len(part1_glossary)} glossary terms")
+    
+    # Separate appendices from main chapters
+    # Chapters 1.x through 6.x are Part I main content
+    # Appendices start with A.
+    main_chapters = []
+    appendix_chapters = []
+    for ch in part1_chapters:
+        title = ch["title"]
+        if title.startswith("A.") or title.startswith("Appendix") or "Quick Navigation" in title:
+            appendix_chapters.append(ch)
+        elif "How to Use" in title:
+            appendix_chapters.append(ch)
+        else:
+            main_chapters.append(ch)
+    
+    print(f"  → {len(main_chapters)} main chapters, {len(appendix_chapters)} appendix items")
+    
+    # ---- PART II: from Part_II_CLEAN.docx ----
+    print("\n[2/3] Extracting Part II from GCC_Playbook_Part_II_CLEAN.docx...")
+    part2_doc = Document(PART2_FILE)
+    part2_chapters = extract_chapters_from_doc(part2_doc, "Part II", "p2-")
+    part2_glossary = extract_glossary_from_doc(part2_doc)
+    part2_refs = extract_references_from_doc(part2_doc)
+    print(f"  → {len(part2_chapters)} chapters, {len(part2_glossary)} glossary terms")
+    
+    # ---- PART III: from Part_III.docx ----
+    print("\n[3/3] Extracting Part III from GCC_Playbook_Part_III.docx...")
+    part3_doc = Document(PART3_FILE)
+    part3_chapters = extract_chapters_from_doc(part3_doc, "Part III", "p3-")
+    part3_refs = extract_references_from_doc(part3_doc)
+    print(f"  → {len(part3_chapters)} chapters")
+    
+    # ---- Combine glossary ----
+    all_glossary = part1_glossary + part2_glossary
+    # Deduplicate
+    seen_terms = set()
+    unique_glossary = []
+    for g in all_glossary:
+        key = g["term"].lower()
+        if key not in seen_terms:
+            seen_terms.add(key)
+            unique_glossary.append(g)
+    unique_glossary.sort(key=lambda x: x["term"].lower())
+    
+    # ---- Combine references ----
+    all_refs = []
+    for r in part1_refs + part2_refs + part3_refs:
+        if r["text"] not in [x["text"] for x in all_refs]:
+            all_refs.append(r)
+    
+    # ---- Build output ----
     data = {
         "title": "The Complete India GCC Reference 2026–2030",
-        "subtitle": "Landscape | Maturity Models | Setup | Governance | Who's Who | AI | Deep Tech | M&A | Finance | Legal | ESG | 2030 Scenarios",
+        "subtitle": "Landscape | Maturity Models | Operating Models | Challenges | KPIs | Community | AI | Deep Tech | M&A | Finance",
         "author": "Curated by Kalilur Rahman",
-        "parts": parts,
-        "glossary": glossary_terms[:200],  # Cap at 200 terms
-        "references": references[:100],  # Cap at 100 references
+        "parts": {
+            "part1": {
+                "title": "Part I: India's GCC Landscape",
+                "subtitle": "Landscape, Maturity, Operating Models, Challenges, KPIs, Community & Ecosystem",
+                "chapters": main_chapters
+            },
+            "part2": {
+                "title": "Part II: GCC by Scale, Stage & Leadership",
+                "subtitle": "Sizing, Setup, Lifecycle, Operating Models, Case Studies, Who's Who",
+                "chapters": part2_chapters
+            },
+            "part3": {
+                "title": "Part III: The Frontier",
+                "subtitle": "AI, Deep Tech, M&A, Finance, Legal, Innovation, ESG, Career, 2030 Scenarios",
+                "chapters": part3_chapters
+            },
+            "appendices": {
+                "title": "Appendices",
+                "subtitle": "Decision Matrices, Scorecards, Checklists, Templates, Resource Directory",
+                "chapters": appendix_chapters
+            }
+        },
+        "glossary": unique_glossary,
+        "references": [r["text"] for r in all_refs[:100]],
         "stats": {
-            "totalChapters": chapter_counter,
-            "part1Chapters": len(parts["part1"]["chapters"]),
-            "part2Chapters": len(parts["part2"]["chapters"]),
-            "part3Chapters": len(parts["part3"]["chapters"]),
-            "glossaryTerms": len(glossary_terms),
-            "references": len(references)
+            "totalChapters": len(main_chapters) + len(part2_chapters) + len(part3_chapters),
+            "part1Chapters": len(main_chapters),
+            "part2Chapters": len(part2_chapters),
+            "part3Chapters": len(part3_chapters),
+            "appendices": len(appendix_chapters),
+            "glossaryTerms": len(unique_glossary),
+            "references": len(all_refs)
         }
     }
     
-    # Write JSON
+    # Write output
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     output_path = os.path.join(OUTPUT_DIR, "content.json")
     with open(output_path, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
     
-    print(f"\nContent extracted to: {output_path}")
-    print(f"Stats: {json.dumps(data['stats'], indent=2)}")
-    print(f"Glossary terms: {len(glossary_terms)}")
-    print(f"References: {len(references)}")
+    print(f"\n{'=' * 60}")
+    print(f"EXTRACTION COMPLETE")
+    print(f"{'=' * 60}")
+    print(f"Output: {output_path}")
+    print(f"Stats:")
+    for k, v in data["stats"].items():
+        print(f"  {k}: {v}")
     
-    return data
+    # Print chapter list for verification
+    print(f"\n--- Part I Chapters ---")
+    for ch in main_chapters:
+        sections = len(ch.get("sections", []))
+        content = len(ch.get("content", []))
+        print(f"  {ch['title'][:70]:<72} ({sections} sections, {content} intro paras)")
+    
+    print(f"\n--- Part II Chapters ---")
+    for ch in part2_chapters:
+        sections = len(ch.get("sections", []))
+        content = len(ch.get("content", []))
+        print(f"  {ch['title'][:70]:<72} ({sections} sections, {content} intro paras)")
+    
+    print(f"\n--- Part III Chapters ---")
+    for ch in part3_chapters:
+        sections = len(ch.get("sections", []))
+        content = len(ch.get("content", []))
+        print(f"  {ch['title'][:70]:<72} ({sections} sections, {content} intro paras)")
+
 
 if __name__ == "__main__":
-    extract_content()
+    main()
