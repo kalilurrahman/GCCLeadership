@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gcc-playbook-v1';
+const CACHE_NAME = 'gcc-playbook-v2';
 const STATIC_ASSETS = [
   '/',
   '/index.html',

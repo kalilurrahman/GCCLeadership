@@ -24,22 +24,71 @@ async function loadData() {
 
 function buildChapterIndex() {
   allChapters = [];
-  const partKeys = ['part1', 'part2', 'part3'];
-  const partLabels = ['Part I', 'Part II', 'Part III'];
-  
+  const partKeys   = ['part1', 'part2', 'part3', 'appendices'];
+  const partLabels = ['Part I', 'Part II', 'Part III', 'Appendices'];
+
   partKeys.forEach((key, pi) => {
     const part = appData.parts[key];
-    if (!part) return;
-    part.chapters.forEach((ch, ci) => {
+    if (!part || !part.chapters) return;
+    part.chapters.forEach(ch => {
       allChapters.push({
         ...ch,
-        partKey: key,
+        partKey:   key,
         partLabel: partLabels[pi],
         partTitle: part.title,
-        globalIndex: allChapters.length
+        globalIndex: allChapters.length,
       });
     });
   });
+}
+
+// ============================================
+// Rich Block Renderer
+// ============================================
+function renderBlocks(blocks) {
+  if (!blocks || !blocks.length) return '';
+  let html = '';
+  let ulItems = [];
+
+  function flushUl() {
+    if (ulItems.length) {
+      html += '<ul class="content-list">' +
+        ulItems.map(i => `<li>${escapeHtml(i)}</li>`).join('') + '</ul>';
+      ulItems = [];
+    }
+  }
+
+  blocks.forEach(block => {
+    if (block.type === 'ul') {
+      // Already a pre-grouped list
+      flushUl();
+      if (block.items && block.items.length) {
+        html += '<ul class="content-list">' +
+          block.items.map(i => `<li>${escapeHtml(i)}</li>`).join('') + '</ul>';
+      }
+    } else if (block.type === 'h3') {
+      flushUl();
+      html += `<h3 class="block-h3">${escapeHtml(block.text)}</h3>`;
+    } else {
+      // 'p' type
+      flushUl();
+      const text = block.text || block;
+      if (typeof text === 'string' && text.trim()) {
+        html += `<p>${escapeHtml(text)}</p>`;
+      }
+    }
+  });
+  flushUl();
+  return html;
+}
+
+// Backward compat: render legacy plain string content arrays
+function renderContent(content) {
+  if (!content || !content.length) return '';
+  return content.map(item => {
+    if (typeof item === 'string') return `<p>${escapeHtml(item)}</p>`;
+    return renderBlocks([item]);
+  }).join('');
 }
 
 // ============================================
@@ -104,6 +153,7 @@ function renderHome() {
     { key: 'part1', cls: 'p1', label: 'I' },
     { key: 'part2', cls: 'p2', label: 'II' },
     { key: 'part3', cls: 'p3', label: 'III' },
+    { key: 'appendices', cls: 'p1', label: 'A' },
   ];
   
   partConfigs.forEach(({ key, cls, label }) => {
@@ -197,71 +247,71 @@ function attachHomeEvents() {
 // ---- Chapter Page ----
 function renderChapter(idx) {
   if (idx === null || idx >= allChapters.length) return renderHome();
-  
+
   const ch = allChapters[idx];
-  
+
+  // Top-level chapter intro blocks
+  const introHTML = renderBlocks(ch.blocks) || renderContent(ch.content);
+
+  // Sections
   let sectionsHTML = '';
   if (ch.sections && ch.sections.length) {
     ch.sections.forEach(section => {
-      const isKey = section.isKeyTakeaway;
-      const contentHTML = (section.content || []).map(p => `<p>${escapeHtml(p)}</p>`).join('');
-      
+      const isKey     = section.isKeyTakeaway;
+      const bodyHTML  = renderBlocks(section.blocks) || renderContent(section.content);
+
       let subsHTML = '';
-      if (section.subsections) {
+      if (section.subsections && section.subsections.length) {
         subsHTML = section.subsections.map(sub => {
-          const subContent = (sub.content || []).map(p => `<p>${escapeHtml(p)}</p>`).join('');
-          return `<h3>${escapeHtml(sub.title)}</h3>${subContent}`;
+          const subBody = renderBlocks(sub.blocks) || renderContent(sub.content);
+          return `<div class="subsection">
+            <h3 class="sub-heading">${escapeHtml(sub.title)}</h3>
+            ${subBody}
+          </div>`;
         }).join('');
       }
-      
+
       if (isKey) {
         sectionsHTML += `
           <div class="key-takeaway chapter-section">
             <h2>🎯 ${escapeHtml(section.title)}</h2>
-            ${contentHTML}${subsHTML}
-          </div>
-        `;
+            ${bodyHTML}${subsHTML}
+          </div>`;
       } else {
         sectionsHTML += `
           <div class="chapter-section">
             <h2>${escapeHtml(section.title)}</h2>
-            ${contentHTML}${subsHTML}
-          </div>
-        `;
+            ${bodyHTML}${subsHTML}
+          </div>`;
       }
     });
   }
-  
-  // Chapter content (direct paragraphs)
-  const directContent = (ch.content || []).map(p => `<p>${escapeHtml(p)}</p>`).join('');
-  
-  // Nav buttons
+
+  // Prev / next nav
   const prevCh = idx > 0 ? allChapters[idx - 1] : null;
   const nextCh = idx < allChapters.length - 1 ? allChapters[idx + 1] : null;
-  
+
   const navHTML = `
     <div class="chapter-nav">
       ${prevCh ? `<div class="chapter-nav-btn prev" data-chapter-idx="${idx - 1}"><span class="label">← Previous</span><span class="title">${escapeHtml(prevCh.title.substring(0, 50))}</span></div>` : '<div></div>'}
       ${nextCh ? `<div class="chapter-nav-btn next" data-chapter-idx="${idx + 1}"><span class="label">Next →</span><span class="title">${escapeHtml(nextCh.title.substring(0, 50))}</span></div>` : '<div></div>'}
-    </div>
-  `;
-  
+    </div>`;
+
   return `
     <article class="chapter-page fade-in">
       <div class="chapter-breadcrumb">
-        <a href="#" data-nav="home">Home</a> › 
-        <a href="#" data-nav="toc">${escapeHtml(ch.partLabel)}</a> › 
-        <span>${escapeHtml(ch.title.substring(0, 40))}…</span>
+        <a href="#" data-nav="home">Home</a> ›
+        <a href="#" data-nav="toc">${escapeHtml(ch.partLabel)}</a> ›
+        <span>${escapeHtml(ch.title.substring(0, 50))}${ch.title.length > 50 ? '…' : ''}</span>
       </div>
       <div class="chapter-hero">
         <h1>${escapeHtml(ch.title)}</h1>
         <p style="color: var(--text-muted); font-size: 13px;">${escapeHtml(ch.partTitle)} · ${ch.sections ? ch.sections.length : 0} sections</p>
       </div>
-      ${directContent}
+      ${introHTML}
       ${sectionsHTML}
       ${navHTML}
-    </article>
-  `;
+    </article>`;
 }
 
 function attachChapterEvents() {
@@ -286,6 +336,7 @@ function renderTOC() {
     { key: 'part1', cls: 'p1', label: 'Part I' },
     { key: 'part2', cls: 'p2', label: 'Part II' },
     { key: 'part3', cls: 'p3', label: 'Part III' },
+    { key: 'appendices', cls: 'p1', label: 'Appendices' },
   ];
   
   let partsHTML = partConfigs.map(({ key, cls, label }) => {
@@ -420,49 +471,69 @@ function performSearch(query) {
   
   const q = query.toLowerCase();
   const results = [];
-  
+
+  // Helper: get first text from blocks or content arrays
+  function firstText(obj) {
+    if (obj.blocks && obj.blocks.length) {
+      const b = obj.blocks[0];
+      return b.type === 'ul' ? (b.items?.[0] || '') : (b.text || '');
+    }
+    if (obj.content && obj.content.length) return obj.content[0];
+    return '';
+  }
+
+  // Helper: search text within blocks and content
+  function searchInBlocks(blocks, content) {
+    const texts = [];
+    if (blocks) blocks.forEach(b => {
+      if (b.type === 'ul') b.items?.forEach(i => texts.push(i));
+      else if (b.text) texts.push(b.text);
+    });
+    if (content) content.forEach(p => typeof p === 'string' && texts.push(p));
+    return texts;
+  }
+
   allChapters.forEach((ch, idx) => {
-    // Search in title
+    // Search in chapter title
     if (ch.title.toLowerCase().includes(q)) {
       results.push({
         chapterIdx: idx,
-        chapter: ch.partLabel,
-        title: ch.title,
-        excerpt: ch.content?.[0] || ch.sections?.[0]?.content?.[0] || '',
-        score: 10
+        chapter:    ch.partLabel,
+        title:      ch.title,
+        excerpt:    firstText(ch),
+        score:      10
       });
     }
-    
+
     // Search in sections
     if (ch.sections) {
       ch.sections.forEach(section => {
         if (section.title.toLowerCase().includes(q)) {
           results.push({
             chapterIdx: idx,
-            chapter: ch.partLabel + ' · ' + ch.title.substring(0, 30),
-            title: section.title,
-            excerpt: section.content?.[0] || '',
-            score: 8
+            chapter:    ch.partLabel + ' · ' + ch.title.substring(0, 30),
+            title:      section.title,
+            excerpt:    firstText(section),
+            score:      8
           });
         }
-        
-        // Search in content
-        if (section.content) {
-          section.content.forEach(p => {
-            if (p.toLowerCase().includes(q)) {
-              const excerptIdx = p.toLowerCase().indexOf(q);
-              const start = Math.max(0, excerptIdx - 60);
-              const end = Math.min(p.length, excerptIdx + q.length + 60);
-              results.push({
-                chapterIdx: idx,
-                chapter: ch.partLabel + ' · ' + section.title.substring(0, 30),
-                title: ch.title,
-                excerpt: '…' + p.substring(start, end) + '…',
-                score: 3
-              });
-            }
-          });
-        }
+
+        // Search within block text / content text
+        const texts = searchInBlocks(section.blocks, section.content);
+        texts.forEach(p => {
+          if (p.toLowerCase().includes(q)) {
+            const i     = p.toLowerCase().indexOf(q);
+            const start = Math.max(0, i - 60);
+            const end   = Math.min(p.length, i + q.length + 60);
+            results.push({
+              chapterIdx: idx,
+              chapter:    ch.partLabel + ' · ' + section.title.substring(0, 30),
+              title:      ch.title,
+              excerpt:    '…' + p.substring(start, end) + '…',
+              score:      3
+            });
+          }
+        });
       });
     }
   });

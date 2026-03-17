@@ -638,6 +638,50 @@ body {
 
 .chapter-nav-btn.next { text-align: right; }
 
+/* Content blocks */
+.content-list {
+  padding-left: 24px;
+  margin: 12px 0 16px;
+  color: var(--text-secondary);
+}
+
+.content-list li {
+  margin-bottom: 8px;
+  line-height: 1.7;
+  padding-left: 4px;
+}
+
+.content-list li::marker {
+  color: var(--accent-primary);
+}
+
+.block-h3 {
+  font-family: var(--font-heading);
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-heading);
+  margin: 20px 0 10px;
+}
+
+.sub-heading {
+  font-family: var(--font-heading);
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-heading);
+  margin: 20px 0 10px;
+}
+
+.subsection {
+  margin: 12px 0;
+  padding-left: 12px;
+  border-left: 2px solid var(--border-subtle);
+}
+
+.subsection:hover {
+  border-left-color: var(--border-active);
+}
+
+
 /* ============================================
    TOC Page
    ============================================ */
